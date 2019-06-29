@@ -178,7 +178,7 @@ class vector {
   vector(InputIterator first, InputIterator last) : data_(std::monostate()) {
     size_t size = std::distance(first, last);
     if (size == 2) {
-      shared_array t* = new_shared(size);
+      shared_array* t = new_shared(size);
       try {
         std::uninitialized_copy(first, last, t->data);
         t->size = size;
@@ -311,7 +311,7 @@ class vector {
     if (data_.index() == 2) {
       if (i == 0 && j == std::get<2>(data_)->size) {
         clear();
-      } else if (std::get<2>(data_)->size == d + 1) {
+      } else if ((int)std::get<2>(data_)->size == d + 1) {
         T v = std::get<2>(data_)->data[0];
         set_data(v);
       } else {
