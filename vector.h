@@ -52,7 +52,7 @@ class vector {
     shared_array* n = reinterpret_cast<shared_array*>(mem);
     return n;
   }
-  shared_array* enlarge(size_t capacity) {
+  shared_array* resize_vector(size_t capacity) {
     shared_array* n = new_shared(capacity);
     if (data_.index() == 1) {
       n->size = 1;
@@ -63,7 +63,7 @@ class vector {
         throw;
       }
     } else if (data_.index() == 2) {
-      n->size = std::get<2>(data_)->size;
+      n->size = std::min(n->capacity, std::get<2>(data_)->size);
       try {
         std::uninitialized_copy_n(std::get<2>(data_)->data, n->size, n->data);
       } catch (...) {
@@ -130,7 +130,7 @@ class vector {
   pointer data() {
     if (data_.index() == 2) {
       if (std::get<2>(data_)->owners > 1)
-        set_data(enlarge(std::get<2>(data_)->size));
+        set_data(resize_vector(std::get<2>(data_)->size));
       return std::get<2>(data_)->data;
     } else if (data_.index() == 1) {
       return &std::get<1>(data_);
@@ -204,10 +204,10 @@ class vector {
     } else {
       shared_array* na;
       if (data_.index() == 2) {
-        na = enlarge(std::get<2>(data_)->capacity *
-                     (std::get<2>(data_)->full() ? 2 : 1));
+        na = resize_vector(std::get<2>(data_)->capacity *
+                           (std::get<2>(data_)->full() ? 2 : 1));
       } else {
-        na = enlarge(DEFAULT_VEC_SIZE);
+        na = resize_vector(DEFAULT_VEC_SIZE);
       }
       try {
         new (na->end()) T(v);
@@ -226,7 +226,7 @@ class vector {
         T v = std::get<2>(data_)->data[0];
         set_data(v);
       } else {
-        shared_array* t = enlarge(std::get<2>(data_)->capacity);
+        shared_array* t = resize_vector(std::get<2>(data_)->capacity);
         t->data[--t->size].~T();
         set_data(t);
       }
@@ -237,7 +237,7 @@ class vector {
 
   void shrink_to_fit() {
     if (data_.index() == 2 && !std::get<2>(data_)->full()) {
-      set_data(enlarge(std::get<2>(data_)->size));
+      set_data(resize_vector(std::get<2>(data_)->size));
     }
   }
 
@@ -245,7 +245,7 @@ class vector {
     if (size() == new_size) return;
     shared_array* t;
     if (new_size > 1) {
-      t = enlarge(new_size);
+      t = resize_vector(new_size);
       try {
         std::uninitialized_value_construct_n(t->end(), new_size - t->size);
       } catch (...) {
@@ -269,7 +269,7 @@ class vector {
     if (size() == new_size) return;
     shared_array* t;
     if (new_size > 1) {
-      t = enlarge(new_size);
+      t = resize_vector(new_size);
       try {
         std::uninitialized_fill_n(t->end(), new_size - t->size, default_value);
       } catch (...) {
@@ -291,7 +291,7 @@ class vector {
   }
   void reserve(size_t new_capacity) {
     if (size() >= new_capacity || new_capacity < 2) return;
-    set_data(enlarge(new_capacity));
+    set_data(resize_vector(new_capacity));
   }
 
   iterator insert(const_iterator pos, const_reference val) {
@@ -315,7 +315,7 @@ class vector {
         T v = std::get<2>(data_)->data[0];
         set_data(v);
       } else {
-        shared_array* t = enlarge(std::get<2>(data_)->capacity);
+        shared_array* t = resize_vector(std::get<2>(data_)->capacity);
         try {
           std::move(t->data + j, t->end(), t->data + i);
           std::destroy(t->end() - d, t->end());
