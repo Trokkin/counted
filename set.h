@@ -1,22 +1,19 @@
 #pragma once
+#include <memory>
 
 template <typename T>
 class set {
+  struct node;
+  using node_ptr = std::unique_ptr<node>;
   struct node {
-    node* left;
-    node* right;
+    node_ptr left;
+    node_ptr right;
     node* parent;
     node() : left(nullptr), right(nullptr), parent(nullptr) {}
     node(node* parent) : left(nullptr), right(nullptr), parent(parent) {}
     node(node* left, node* right, node* parent)
         : left(left), right(right), parent(parent) {}
     virtual ~node() = default;
-
-    void destroy() {
-      if (left) left->destroy();
-      if (right) right->destroy();
-      delete this;
-    }
   };
 
   struct node_v : public node {
@@ -26,10 +23,11 @@ class set {
     node_v(T const& v, node* left, node* right, node* parent)
         : node(left, right, parent), value(v) {}
   };
-  node* copy_tree(node* t, node* parent) {
-    node* n = new node_v(static_cast<node_v*>(t)->value, parent);
-    if (t->left) n->left = copy_tree(t->left, n);
-    if (t->right) n->right = copy_tree(t->right, n);
+
+  node_ptr copy_tree(node* t, node* parent) {
+    node_ptr n(new node_v(static_cast<node_v*>(t)->value, parent));
+    if (t->left) n.get()->left = copy_tree(t->left.get(), n.get());
+    if (t->right) n.get()->right = copy_tree(t->right.get(), n.get());
     return n;
   }
   node dummy;
@@ -52,11 +50,11 @@ class set {
     iterator_t& operator++() {
       if (ref == nullptr) return *this;
       if (ref->right != nullptr) {
-        ref = ref->right;
-        while (ref->left != nullptr) ref = ref->left;
+        ref = ref->right.get();
+        while (ref->left != nullptr) ref = ref->left.get();
         return *this;
       }
-      while (ref->parent != nullptr && ref->parent->right == ref)
+      while (ref->parent != nullptr && ref->parent->right.get() == ref)
         ref = ref->parent;
       if (ref->parent != nullptr) ref = ref->parent;
       return *this;
@@ -64,11 +62,11 @@ class set {
     iterator_t& operator--() {
       if (ref == nullptr) return *this;
       if (ref->left != nullptr) {
-        ref = ref->left;
-        while (ref->right != nullptr) ref = ref->right;
+        ref = ref->left.get();
+        while (ref->right != nullptr) ref = ref->right.get();
         return *this;
       }
-      while (ref->parent != nullptr && ref->parent->left == ref)
+      while (ref->parent != nullptr && ref->parent->left.get() == ref)
         ref = ref->parent;
       if (ref->parent != nullptr) ref = ref->parent;
       return *this;
@@ -107,7 +105,7 @@ class set {
   set() {}
   set(set const& other) : set() {
     dummy.left =
-        other.dummy.left ? copy_tree(other.dummy.left, &dummy) : nullptr;
+        other.dummy.left ? copy_tree(other.dummy.left.get(), &dummy) : nullptr;
   }
   set& operator=(set other) {
     swap(*this, other);
@@ -118,14 +116,13 @@ class set {
   bool empty() const noexcept { return dummy.left == nullptr; }
   void clear() noexcept {
     if (dummy.left) {
-      dummy.left->destroy();
-      dummy.left = nullptr;
+      dummy.left.reset();
     }
   }
 
   const_iterator begin() const noexcept {
     node* r = const_cast<node*>(&dummy);
-    while (r->left) r = r->left;
+    while (r->left) r = r->left.get();
     return const_iterator(r);
   }
   const_iterator end() const noexcept {
@@ -133,7 +130,7 @@ class set {
   }
   iterator begin() noexcept {
     node* r = &dummy;
-    while (r->left) r = r->left;
+    while (r->left) r = r->left.get();
     return iterator(r);
   }
   iterator end() noexcept { return iterator(&dummy); }
@@ -156,56 +153,58 @@ class set {
   iterator erase(const_iterator pos) {
     iterator r = pos;
     ++r;
-    node* n = pos.ref;
-    node*& parref = (n->parent->left == n ? n->parent->left : n->parent->right);
+    node_ptr& parref =
+        (pos.ref->parent->left.get() == pos.ref ? pos.ref->parent->left
+                                                : pos.ref->parent->right);
+    node* n = parref.release();
     if (!n->left && !n->right) {
-      parref = nullptr;
+      parref.reset();
     } else if (!n->right) {
-      parref = n->left;
-      n->left->parent = n->parent;
+      n->left.get()->parent = n->parent;
+      parref.swap(n->left);
     } else if (!n->left) {
-      parref = n->right;
-      n->right->parent = n->parent;
+      n->right.get()->parent = n->parent;
+      parref.swap(n->right);
     } else {
-      node* p = r.ref;
-      if (p->parent->left == p) {
-        p->parent->left = p->right;
-        if (p->right) p->right->parent = p->parent;
-        p->right = nullptr;
-        p->parent = nullptr;
+      bool was_p_left = r.ref->parent->left.get() == r.ref;
+      node* p =
+          (was_p_left ? r.ref->parent->left : r.ref->parent->right).release();
+      if (was_p_left) {
+        if (p->right != nullptr) p->right.get()->parent = p->parent;
+        p->parent->left.swap(p->right);
 
-        parref = p;
         p->parent = n->parent;
-        p->left = n->left;
-        n->left->parent = p;
-        p->right = n->right;
-        n->right->parent = p;
+        n->left.get()->parent = p;
+        n->right.get()->parent = p;
+        p->left.swap(n->left);
+        p->right.swap(n->right);
+        parref = node_ptr(p);
       } else {
-        parref = p;
         p->parent = n->parent;
-        p->left = n->left;
-        n->left->parent = p;
+        n->left.get()->parent = p;
+        p->left.swap(n->left);
+        parref = node_ptr(p);
       }
     }
-    delete (static_cast<node_v*>(n));
+    delete n;
     return r;
   }
 
   std::pair<iterator, bool> insert(const_reference v) {
-    node* t = dummy.left;
+    node* t = dummy.left.get();
     if (!t) {
-      dummy.left = new node_v(v, &dummy);
-      return {iterator(dummy.left), true};
+      dummy.left = node_ptr(new node_v(v, &dummy));
+      return {iterator(dummy.left.get()), true};
     }
     while (true) {
       const_reference nv = static_cast<node_v*>(t)->value;
       if (nv == v) return {iterator(t), false};
-      node*& cref = v < nv ? t->left : t->right;
-      if (!cref) {
-        cref = new node_v(v, t);
-        return {iterator(cref), true};
+      node_ptr& cref = v < nv ? t->left : t->right;
+      if (cref == nullptr) {
+        cref = node_ptr(new node_v(v, t));
+        return {iterator(cref.get()), true};
       }
-      t = cref;
+      t = cref.get();
     }
   }
 
@@ -241,5 +240,5 @@ void swap(set<V>& a, set<V>& b) noexcept {
   if (!b.empty()) {
     b.dummy.left->parent = &a.dummy;
   }
-  std::swap(a.dummy, b.dummy);
+  std::swap(a.dummy.left, b.dummy.left);
 }
