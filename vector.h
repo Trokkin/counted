@@ -177,7 +177,7 @@ class vector {
   template <typename InputIterator>
   vector(InputIterator first, InputIterator last) : data_(std::monostate()) {
     size_t size = std::distance(first, last);
-    if (size == 2) {
+    if (size > 1) {
       shared_array* t = new_shared(size);
       try {
         std::uninitialized_copy(first, last, t->data);
