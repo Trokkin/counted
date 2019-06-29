@@ -42,14 +42,14 @@ class vector {
   std::variant<std::monostate, T, shared_array*> data_;
 
   shared_array* new_shared(size_t capacity) {
-    shared_array* n = static_cast<shared_array*>(operator new(
-        sizeof(shared_array) + capacity * sizeof(T)));
-    if (!n)
-      throw std::runtime_error("Failed to allocate array of size " +
-                               std::to_string(capacity));
-    n->capacity = capacity;
-    n->owners = 1;
-    n->size = 0;
+    auto mem = operator new(sizeof(shared_array) + capacity * sizeof(T));
+    try {
+      new (mem) shared_array{capacity, 0, 1};
+    } catch (...) {
+      operator delete(mem);
+      throw;
+    }
+    shared_array* n = reinterpret_cast<shared_array*>(mem);
     return n;
   }
   shared_array* enlarge(size_t capacity) {
@@ -176,13 +176,17 @@ class vector {
 
   template <typename InputIterator>
   vector(InputIterator first, InputIterator last) : data_(std::monostate()) {
-    if (data_.index() == 2) {
-      data_ = new_shared(std::distance(first, last));
-      for (size_t i = 0; first != last; ++i, ++first) {
-        std::get<2>(data_)->data[i] = *first;
-        ++first;
+    size_t size = std::distance(first, last);
+    if (size == 2) {
+      shared_array t* = new_shared(size);
+      try {
+        std::uninitialized_copy(first, last, t->data);
+        t->size = size;
+      } catch (...) {
+        operator delete(t);
       }
-    } else if (data_.index() == 1) {
+      data_ = t;
+    } else if (size == 1) {
       data_ = *first;
     } else {
       data_ = std::monostate();
